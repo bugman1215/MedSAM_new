@@ -23,6 +23,10 @@ import random
 from datetime import datetime
 import shutil
 import glob
+from utils.SurfaceDice import compute_dice_coefficient
+
+from get_clip_embedding import get_clip_embeddings
+
 
 # set seeds
 torch.manual_seed(2023)
@@ -115,27 +119,35 @@ class NpyDataset(Dataset):
 
 
 # %% sanity test of dataset class
-tr_dataset = NpyDataset("data/npy/CT_Abd")
-tr_dataloader = DataLoader(tr_dataset, batch_size=8, shuffle=True)
+tr_dataset = NpyDataset("./data/npy/CT_Abd")
+tr_dataloader = DataLoader(tr_dataset, batch_size=1, shuffle=True)
 for step, (image, gt, bboxes, names_temp) in enumerate(tr_dataloader):
     print(image.shape, gt.shape, bboxes.shape)
     # show the example
     _, axs = plt.subplots(1, 2, figsize=(25, 25))
-    idx = random.randint(0, 7)
-    axs[0].imshow(image[idx].cpu().permute(1, 2, 0).numpy())
+
+    # 确保 idx 的范围在 gt 的第一个维度大小内
+    idx = 0  # 由于 batch_size=1，确保 idx 不会超过 gt 的大小
+    axs[0].imshow(image[0].cpu().permute(1, 2, 0).numpy())
     show_mask(gt[idx].cpu().numpy(), axs[0])
     show_box(bboxes[idx].numpy(), axs[0])
     axs[0].axis("off")
     # set title
     axs[0].set_title(names_temp[idx])
-    idx = random.randint(0, 7)
-    axs[1].imshow(image[idx].cpu().permute(1, 2, 0).numpy())
+
+    # 如果需要展示两个不同的样本，确保 batch_size >= 2
+    if gt.size(0) > 1:
+        idx = 1
+    else:
+        idx = 0  # 如果 batch_size=1，第二个图使用同样的 idx
+
+    axs[1].imshow(image[0].cpu().permute(1, 2, 0).numpy())
     show_mask(gt[idx].cpu().numpy(), axs[1])
     show_box(bboxes[idx].numpy(), axs[1])
     axs[1].axis("off")
     # set title
     axs[1].set_title(names_temp[idx])
-    # plt.show()
+
     plt.subplots_adjust(wspace=0.01, hspace=0)
     plt.savefig("./data_sanitycheck.png", bbox_inches="tight", dpi=300)
     plt.close()
@@ -190,7 +202,7 @@ if args.use_wandb:
         project=args.task_name,
         config={
             "lr": args.lr,
-            "batch_size": args.batch_size,
+            "batch_size": 1,
             "data_path": args.tr_npy_path,
             "model_type": args.model_type,
         },
@@ -206,22 +218,23 @@ device = torch.device(args.device)
 
 class MedSAM(nn.Module):
     def __init__(
-        self,
-        image_encoder,
-        mask_decoder,
-        prompt_encoder,
+            self,
+            image_encoder,
+            mask_decoder,
+            prompt_encoder,
     ):
         super().__init__()
         self.image_encoder = image_encoder
         self.mask_decoder = mask_decoder
         self.prompt_encoder = prompt_encoder
-        # freeze prompt encoder
+
+        # Freeze prompt encoder
         for param in self.prompt_encoder.parameters():
             param.requires_grad = False
 
     def forward(self, image, box):
-        image_embedding = self.image_encoder(image)  # (B, 256, 64, 64)
-        # do not compute gradients for prompt encoder
+        image_embedding = self.image_encoder(image)  # 获取多尺度特征图
+
         with torch.no_grad():
             box_torch = torch.as_tensor(box, dtype=torch.float32, device=image.device)
             if len(box_torch.shape) == 2:
@@ -232,13 +245,25 @@ class MedSAM(nn.Module):
                 boxes=box_torch,
                 masks=None,
             )
+
+            print(f"Sparse embeddings size: {sparse_embeddings.shape}")  # 打印稀疏嵌入的尺寸
+            print(f"Dense embeddings size: {dense_embeddings.shape}")  # 打印稠密嵌入的尺寸
+
+            clip_embeddings = get_clip_embeddings(image)
+            print(f"CLIP embeddings size: {clip_embeddings.shape}")  # 打印CLIP嵌入的尺寸
+
+        # 调用 mask_decoder 的 forward 方法，进行掩码预测
         low_res_masks, _ = self.mask_decoder(
-            image_embeddings=image_embedding,  # (B, 256, 64, 64)
-            image_pe=self.prompt_encoder.get_dense_pe(),  # (1, 256, 64, 64)
-            sparse_prompt_embeddings=sparse_embeddings,  # (B, 2, 256)
-            dense_prompt_embeddings=dense_embeddings,  # (B, 256, 64, 64)
+            image_embeddings=image_embedding,  # 传入图像嵌入
+            image_pe=self.prompt_encoder.get_dense_pe(),
+            sparse_prompt_embeddings=sparse_embeddings,
+            dense_prompt_embeddings=dense_embeddings,
+            clip_prompt_embeddings=clip_embeddings,
             multimask_output=False,
         )
+        print(f"Low-resolution masks size: {low_res_masks.shape}")  # 打印低分辨率掩码的尺寸
+
+        # 将低分辨率的掩码上采样到原始图像尺寸
         ori_res_masks = F.interpolate(
             low_res_masks,
             size=(image.shape[2], image.shape[3]),
@@ -253,14 +278,21 @@ def main():
     shutil.copyfile(
         __file__, join(model_save_path, run_id + "_" + os.path.basename(__file__))
     )
+    print("args:", args.checkpoint, args.model_type)
 
     sam_model = sam_model_registry[args.model_type](checkpoint=args.checkpoint)
+    sam_model.prompt_encoder
+
+
+
+
     medsam_model = MedSAM(
-        image_encoder=sam_model.image_encoder,
-        mask_decoder=sam_model.mask_decoder,
-        prompt_encoder=sam_model.prompt_encoder,
-    ).to(device)
+       image_encoder=sam_model.image_encoder,
+       mask_decoder=sam_model.mask_decoder,
+       prompt_encoder=sam_model.prompt_encoder,).to(device)
     medsam_model.train()
+
+
 
     print(
         "Number of total parameters: ",
@@ -285,7 +317,7 @@ def main():
     # cross entropy loss
     ce_loss = nn.BCEWithLogitsLoss(reduction="mean")
     # %% train
-    num_epochs = args.num_epochs
+    num_epochs = 2
     iter_num = 0
     losses = []
     best_loss = 1e10
@@ -313,6 +345,7 @@ def main():
 
     for epoch in range(start_epoch, num_epochs):
         epoch_loss = 0
+        epoch_dice = 0
         for step, (image, gt2D, boxes, _) in enumerate(tqdm(train_dataloader)):
             optimizer.zero_grad()
             boxes_np = boxes.detach().cpu().numpy()
@@ -335,15 +368,19 @@ def main():
                 optimizer.step()
                 optimizer.zero_grad()
 
+            dice_coefficient = compute_dice_coefficient(gt2D.detach().numpy(), medsam_pred.detach().numpy() > 0.5 )
+            epoch_dice += dice_coefficient
+
             epoch_loss += loss.item()
             iter_num += 1
 
         epoch_loss /= step
+        epoch_dice /= step
         losses.append(epoch_loss)
         if args.use_wandb:
-            wandb.log({"epoch_loss": epoch_loss})
+            wandb.log({"epoch_loss": epoch_loss}, {"epoch_dice": epoch_dice})
         print(
-            f'Time: {datetime.now().strftime("%Y%m%d-%H%M")}, Epoch: {epoch}, Loss: {epoch_loss}'
+            f'Time: {datetime.now().strftime("%Y%m%d-%H%M")}, Epoch: {epoch}, Loss: {epoch_loss}, accuracy : {epoch_dice}'
         )
         ## save the latest model
         checkpoint = {

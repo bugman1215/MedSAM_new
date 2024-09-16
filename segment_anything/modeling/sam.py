@@ -14,7 +14,8 @@ from typing import Any, Dict, List, Tuple
 from .image_encoder import ImageEncoderViT
 from .mask_decoder import MaskDecoder
 from .prompt_encoder import PromptEncoder
-
+from get_clip_embedding import get_clip_embeddings
+    
 
 class Sam(nn.Module):
     mask_threshold: float = 0.0
@@ -102,6 +103,9 @@ class Sam(nn.Module):
         )
         image_embeddings = self.image_encoder(input_images)
 
+
+
+
         outputs = []
         for image_record, curr_embedding in zip(batched_input, image_embeddings):
             if "point_coords" in image_record:
@@ -113,11 +117,15 @@ class Sam(nn.Module):
                 boxes=image_record.get("boxes", None),
                 masks=image_record.get("mask_inputs", None),
             )
+            #
+            clip_embeddings = get_clip_embeddings(image_record["image"])
+
             low_res_masks, iou_predictions = self.mask_decoder(
                 image_embeddings=curr_embedding.unsqueeze(0),
                 image_pe=self.prompt_encoder.get_dense_pe(),
                 sparse_prompt_embeddings=sparse_embeddings,
                 dense_prompt_embeddings=dense_embeddings,
+                clip_prompt_embeddings = clip_embeddings,
                 multimask_output=multimask_output,
             )
             masks = self.postprocess_masks(

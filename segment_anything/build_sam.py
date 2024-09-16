@@ -90,7 +90,8 @@ def _build_sam(
             image_embedding_size=(image_embedding_size, image_embedding_size),
             input_image_size=(image_size, image_size),
             mask_in_chans=16,
-        ),
+            clip_model_name = 'hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224',
+    ),
         mask_decoder=MaskDecoder(
             num_multimask_outputs=3,
             transformer=TwoWayTransformer(
@@ -141,6 +142,6 @@ def _build_sam(
 
     if checkpoint is not None:
         with open(checkpoint, "rb") as f:
-            state_dict = torch.load(f, map_location=torch.device('cpu'))
-        sam.load_state_dict(state_dict)
+            state_dict = torch.load(f, map_location=torch.device('cpu'),weights_only=True)
+        sam.load_state_dict(state_dict,strict=False)
     return sam

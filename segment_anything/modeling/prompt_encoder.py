@@ -8,9 +8,9 @@
 import numpy as np
 import torch
 from torch import nn
+from PIL import Image
 
 from typing import Any, Optional, Tuple, Type
-
 from .common import LayerNorm2d
 
 
@@ -22,6 +22,7 @@ class PromptEncoder(nn.Module):
         input_image_size: Tuple[int, int],
         mask_in_chans: int,
         activation: Type[nn.Module] = nn.GELU,
+        clip_model_name = 'hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224',
     ) -> None:
         """
         Encodes prompts for input to SAM's mask decoder.
@@ -64,6 +65,9 @@ class PromptEncoder(nn.Module):
             nn.Conv2d(mask_in_chans, embed_dim, kernel_size=1),
         )
         self.no_mask_embed = nn.Embedding(1, embed_dim)
+
+
+
 
     def get_dense_pe(self) -> torch.Tensor:
         """
@@ -135,6 +139,8 @@ class PromptEncoder(nn.Module):
     def _get_device(self) -> torch.device:
         return self.point_embeddings[0].weight.device
 
+
+
     def forward(
         self,
         points: Optional[Tuple[torch.Tensor, torch.Tensor]],
@@ -162,6 +168,7 @@ class PromptEncoder(nn.Module):
         sparse_embeddings = torch.empty(
             (bs, 0, self.embed_dim), device=self._get_device()
         )
+
         if points is not None:
             coords, labels = points
             point_embeddings = self._embed_points(coords, labels, pad=(boxes is None))
