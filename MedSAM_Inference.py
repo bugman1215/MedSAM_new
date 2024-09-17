@@ -99,7 +99,7 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-device = args.device
+device = "cpu"
 medsam_model = sam_model_registry["vit_b"](checkpoint=args.checkpoint)
 medsam_model = medsam_model.to(device)
 medsam_model.eval()

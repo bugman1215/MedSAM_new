@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-# %% import packages
+
 # pip install connected-components-3d
 import numpy as np
 
@@ -30,13 +29,13 @@ voxel_num_thre2d = 100
 voxel_num_thre3d = 1000
 
 names = sorted(os.listdir(gt_path))
-print(f"ori \# files {len(names)=}")
+print(f"ori \# files {len(names)}")
 names = [
     name
     for name in names
     if os.path.exists(join(nii_path, name.split(gt_name_suffix)[0] + img_name_suffix))
 ]
-print(f"after sanity check \# files {len(names)=}")
+print(f"after sanity check \# files {len(names)}")
 
 # set label ids that are excluded
 remove_label_ids = [

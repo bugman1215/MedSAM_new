@@ -107,16 +107,23 @@ class ImageEncoderViT(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        print(f"Input image size: {x.shape}")  # 打印输入图像尺寸
         x = self.patch_embed(x)
         if self.pos_embed is not None:
             x = x + self.pos_embed
 
+        features = []
         for blk in self.blocks:
             x = blk(x)
+            # 添加
+            features.append(x)
 
         x = self.neck(x.permute(0, 3, 1, 2))
+        print(f"Feature map size after neck: {x.shape}")  # 打印 neck 后的特征图尺寸
+        features.append(x)
 
-        return x
+        return features
+
 
 
 class Block(nn.Module):
