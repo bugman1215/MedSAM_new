@@ -35,16 +35,13 @@ class ModifiedCLIPModel(nn.Module):
 
         image_features = image_features.expand_as(text_features)
 
-
-        # 检查 image_features 和 text_features 的输出维度
-        image_features = self.image_projection(image_features)  # 映射到256维
+        image_features = self.image_projection(image_features)
 
         text_features = self.text_projection(text_features)
 
 
         print(f"Projected image features shape: {image_features.shape}")
 
-        # 进行跨模态注意力
         attn_output, attn_weights = self.cross_attention(image_features, text_features)
 
         return attn_output
@@ -56,29 +53,25 @@ def get_clip_embeddings(images, text_inputs) -> torch.Tensor:
     embed_dim = 256
     num_heads = 8
 
-    # 加载 CLIP 模型和预处理函数
     clip_model, clip_preprocess = create_model_from_pretrained(clip_model_name)
 
     modified_clip_model = ModifiedCLIPModel(clip_model, embed_dim, num_heads)
 
-    # 预处理图像批次
     processed_images = []
-    for image in images:  # 假设 images 是一个 batch
+    for image in images:
         if isinstance(image, torch.Tensor):
             image = T.ToPILImage()(image)
-        processed_images.append(clip_preprocess(image).unsqueeze(0))  # 处理后的图像添加到列表中
+        processed_images.append(clip_preprocess(image).unsqueeze(0))
 
-    clip_inputs = torch.cat(processed_images, dim=0)  # 将所有处理后的图像拼接成一个 batch
+    clip_inputs = torch.cat(processed_images, dim=0)
 
-    # 确保 text_inputs 也是批次的
-    if text_inputs.ndim == 2:  # [batch_size, seq_len]
-        pass  # 如果是已经处理好的批次，直接使用
+    if text_inputs.ndim == 2:
+        pass
 
-    # 使用模型获取跨模态注意力处理后的嵌入
-    with torch.no_grad():
-        attn_output = modified_clip_model(clip_inputs, text_inputs)  # 处理整个批次
-        clip_image_embeddings = attn_output
-        clip_prompt_embeddings = clip_image_embeddings.view(clip_image_embeddings.size(0), 1, embed_dim)  # 调整形状
+
+    attn_output = modified_clip_model(clip_inputs, text_inputs)
+    clip_image_embeddings = attn_output
+    clip_prompt_embeddings = clip_image_embeddings.view(clip_image_embeddings.size(0), 1, embed_dim)
 
     return clip_prompt_embeddings
 
