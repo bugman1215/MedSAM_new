@@ -47,6 +47,16 @@ class ModifiedCLIPModel(nn.Module):
         return attn_output
 
 
+def create_modified_clip_model():
+    clip_model_name = "hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"
+    embed_dim = 256
+    num_heads = 8
+
+    clip_model, clip_preprocess = create_model_from_pretrained(clip_model_name)
+    modified_clip_model = ModifiedCLIPModel(clip_model, embed_dim, num_heads)
+
+    return modified_clip_model
+
 # 提取经过跨模态注意力处理后的特征嵌入
 def get_clip_embeddings(images, text_inputs) -> torch.Tensor:
     clip_model_name = "hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"
@@ -74,5 +84,7 @@ def get_clip_embeddings(images, text_inputs) -> torch.Tensor:
     clip_prompt_embeddings = clip_image_embeddings.view(clip_image_embeddings.size(0), 1, embed_dim)
 
     return clip_prompt_embeddings
+
+
 
 

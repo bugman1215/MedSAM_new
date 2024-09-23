@@ -27,6 +27,8 @@ import glob
 from utils.SurfaceDice import compute_dice_coefficient
 
 from get_clip_embedding1 import get_clip_embeddings
+from get_clip_embedding1 import create_modified_clip_model
+
 
 
 # set seeds
@@ -273,6 +275,7 @@ class MedSAM(nn.Module):
             print(f"Dense embeddings size: {dense_embeddings.shape}")  # 打印稠密嵌入的尺寸
 
             clip_embeddings = get_clip_embeddings(image, text_input)
+
             print(f"CLIP embeddings size: {clip_embeddings.shape}")  # 打印CLIP嵌入的尺寸
 
         # 调用 mask_decoder 的 forward 方法，进行掩码预测
@@ -309,29 +312,55 @@ def main():
 
 
 
+
     medsam_model = MedSAM(
        image_encoder=sam_model.image_encoder,
        mask_decoder=sam_model.mask_decoder,
        prompt_encoder=sam_model.prompt_encoder,).to(device)
     medsam_model.train()
 
+    modified_clip_model = create_modified_clip_model()
 
 
+
+
+    # 打印参数信息
     print(
-        "Number of total parameters: ",
+        "Number of total parameters in MedSAM: ",
         sum(p.numel() for p in medsam_model.parameters()),
-    )  # 93735472
-    print(
-        "Number of trainable parameters: ",
-        sum(p.numel() for p in medsam_model.parameters() if p.requires_grad),
-    )  # 93729252
+    )  # 打印 MedSAM 模型的总参数数量
 
+    print(
+        "Number of trainable parameters in MedSAM: ",
+        sum(p.numel() for p in medsam_model.parameters() if p.requires_grad),
+    )  # 打印 MedSAM 模型的可训练参数数量
+
+    print(
+        "Number of total parameters in ModifiedCLIPModel: ",
+        sum(p.numel() for p in modified_clip_model.parameters()),
+    )  # 打印 ModifiedCLIPModel 模型的总参数数量
+
+    print(
+        "Number of trainable parameters in ModifiedCLIPModel: ",
+        sum(p.numel() for p in modified_clip_model.parameters() if p.requires_grad),
+    )  # 打印 ModifiedCLIPModel 模型的可训练参数数量
+
+    # 获取 MedSAM 的图像编码器和 mask 解码器的参数
     img_mask_encdec_params = list(medsam_model.image_encoder.parameters()) + list(
         medsam_model.mask_decoder.parameters()
     )
+
+    # 获取 ModifiedCLIPModel 的参数
+    clip_params = list(modified_clip_model.parameters())
+
+    # 将两者的参数结合
+    all_trainable_params = img_mask_encdec_params + clip_params
+
+    # 定义优化器，优化所有参数
     optimizer = torch.optim.AdamW(
-        img_mask_encdec_params, lr=args.lr, weight_decay=args.weight_decay
+        all_trainable_params, lr=args.lr, weight_decay=args.weight_decay
     )
+
     print(
         "Number of image encoder and mask decoder parameters: ",
         sum(p.numel() for p in img_mask_encdec_params if p.requires_grad),
