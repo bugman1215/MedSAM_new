@@ -53,9 +53,17 @@ def create_modified_clip_model():
     num_heads = 8
 
     clip_model, clip_preprocess = create_model_from_pretrained(clip_model_name)
+
     modified_clip_model = ModifiedCLIPModel(clip_model, embed_dim, num_heads)
 
+    for param in clip_model.parameters():
+        param.requires_grad = False
+
+    for param in modified_clip_model.cross_attention.parameters():
+        param.requires_grad = False
+
     return modified_clip_model
+
 
 # 提取经过跨模态注意力处理后的特征嵌入
 def get_clip_embeddings(images, text_inputs) -> torch.Tensor:
@@ -67,23 +75,22 @@ def get_clip_embeddings(images, text_inputs) -> torch.Tensor:
 
     modified_clip_model = ModifiedCLIPModel(clip_model, embed_dim, num_heads)
 
-    processed_images = []
-    for image in images:
-        if isinstance(image, torch.Tensor):
-            image = T.ToPILImage()(image)
-        processed_images.append(clip_preprocess(image).unsqueeze(0))
+    with torch.no_grad():
+        processed_images = []
+        for image in images:
+            if isinstance(image, torch.Tensor):
+                image = T.ToPILImage()(image)
+            processed_images.append(clip_preprocess(image).unsqueeze(0))
 
-    clip_inputs = torch.cat(processed_images, dim=0)
+        clip_inputs = torch.cat(processed_images, dim=0)
 
-    if text_inputs.ndim == 2:
-        pass
+        attn_output = modified_clip_model(clip_inputs, text_inputs)
 
-
-    attn_output = modified_clip_model(clip_inputs, text_inputs)
     clip_image_embeddings = attn_output
     clip_prompt_embeddings = clip_image_embeddings.view(clip_image_embeddings.size(0), 1, embed_dim)
 
     return clip_prompt_embeddings
+
 
 
 
