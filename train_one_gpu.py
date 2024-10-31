@@ -62,89 +62,99 @@ def show_box(box, ax):
     )
 
 
+
+
 class NpyDataset(Dataset):
-    def __init__(self, data_root, bbox_shift=20, tokenizer_name="microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"):
-        self.data_root = data_root
-        self.gt_path = join(data_root, "gts")
-        self.img_path = join(data_root, "imgs")
+    def __init__(self, data_roots, bbox_shift=20, tokenizer_name="microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"):
+        self.data_roots = data_roots
+        self.img_paths = []
+        self.gt_paths = []
 
-        # 加入描述性文件
-        self.description_file = os.path.join(data_root, "descriptions.txt")
+        self.text_descriptions = []
 
-        self.gt_path_files = sorted(
-            glob.glob(join(self.gt_path, "**/*.npy"), recursive=True)
-        )
-        self.gt_path_files = [
-            file
-            for file in self.gt_path_files
-            if os.path.isfile(join(self.img_path, os.path.basename(file)))
-        ]
+
         self.bbox_shift = bbox_shift
         # 加载 tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
-        # 加载共享的文本描述
-        with open(self.description_file, 'r') as f:
-            self.shared_description = f.read().strip()
+        for data_root in self.data_roots:
+            img_dir = os.path.join(data_root, "imgs")
+            gt_dir = os.path.join(data_root, "gts")
+            description_file = os.path.join(data_root, "descriptions.txt")
 
-        # 对共享的文本进行一次性tokenize
-        self.shared_text_tokens = self.tokenizer(
-            self.shared_description,
-            return_tensors="pt",
-            truncation=True,
-            padding="max_length",
-            max_length=77
-        )
+            # 加载器官的文本描述
+            with open(description_file, 'r') as f:
+                description = f.read().strip()
 
-        print(f"number of images: {len(self.gt_path_files)}")
+            # 获取所有图像和标签文件名
+            organ_img_paths = sorted(glob.glob(os.path.join(img_dir, "*.npy")))
+            organ_gt_paths = sorted(glob.glob(os.path.join(gt_dir, "*.npy")))
+
+            # 确保图像和标签数量一致
+            assert len(organ_img_paths) == len(organ_gt_paths), "图像和标签数量不匹配"
+
+            # 添加到列表中
+            self.img_paths.extend(organ_img_paths)
+            self.gt_paths.extend(organ_gt_paths)
+            self.text_descriptions.extend([description] * len(organ_img_paths))
+
+        print(f"Number of images: {len(self.img_paths)}")
+
+
 
     def __len__(self):
-        return len(self.gt_path_files)
+        return len(self.gt_paths)
 
     def __getitem__(self, index):
-        # load npy image (1024, 1024, 3), [0,1]
-        img_name = os.path.basename(self.gt_path_files[index])
-        img_1024 = np.load(
-            join(self.img_path, img_name), "r", allow_pickle=True
-        )  # (1024, 1024, 3)
-        # convert the shape to (3, H, W)
+        # 加载图像和标签
+        img_path = self.img_paths[index]
+        gt_path = self.gt_paths[index]
+        img_name = os.path.basename(img_path)
+
+        img_1024 = np.load(img_path, "r", allow_pickle=True)
         img_1024 = np.transpose(img_1024, (2, 0, 1))
-        assert (
-            np.max(img_1024) <= 1.0 and np.min(img_1024) >= 0.0
-        ), "image should be normalized to [0, 1]"
-        gt = np.load(
-            self.gt_path_files[index], "r", allow_pickle=True
-        )  # multiple labels [0, 1,4,5...], (256,256)
-        assert img_name == os.path.basename(self.gt_path_files[index]), (
-            "img gt name error" + self.gt_path_files[index] + self.npy_files[index]
-        )
-        label_ids = np.unique(gt)[1:]
-        gt2D = np.uint8(
-            gt == random.choice(label_ids.tolist())
-        )  # only one label, (256, 256)
-        assert np.max(gt2D) == 1 and np.min(gt2D) == 0.0, "ground truth should be 0, 1"
+        gt = np.load(gt_path, "r", allow_pickle=True)
+
+        gt2D = np.uint8(gt > 0)
+
+        # 计算 bounding box
         y_indices, x_indices = np.where(gt2D > 0)
         x_min, x_max = np.min(x_indices), np.max(x_indices)
         y_min, y_max = np.min(y_indices), np.max(y_indices)
-        # add perturbation to bounding box coordinates
         H, W = gt2D.shape
         x_min = max(0, x_min - random.randint(0, self.bbox_shift))
         x_max = min(W, x_max + random.randint(0, self.bbox_shift))
         y_min = max(0, y_min - random.randint(0, self.bbox_shift))
         y_max = min(H, y_max + random.randint(0, self.bbox_shift))
         bboxes = np.array([x_min, y_min, x_max, y_max])
+
+        # 获取对应的文本描述并进行 tokenizer
+        description = self.text_descriptions[index]
+        text_tokens = self.tokenizer(
+            description,
+            return_tensors="pt",
+            truncation=True,
+            padding="max_length",
+            max_length=77
+        )
+
         return (
             torch.tensor(img_1024).float(),
             torch.tensor(gt2D[None, :, :]).long(),
             torch.tensor(bboxes).float(),
             img_name,
-            # 共享的文本 tokens
-            self.shared_text_tokens['input_ids'].squeeze(0),
+            text_tokens['input_ids'].squeeze(0),
         )
 
-
 # %% sanity test of dataset class
-tr_dataset = NpyDataset("./data/npy/CT_Abd")
+data_roots = [
+    "./data/npy/CT_Abd/liver",
+    "./data/npy/CT_Abd/kidney",
+    "./data/npy/CT_Abd/spleen",
+    "./data/npy/CT_Abd/pancreas"
+]
+
+tr_dataset = NpyDataset(data_roots)
 tr_dataloader = DataLoader(tr_dataset, batch_size=1, shuffle=True)
 for step, (image, gt, bboxes, names_temp, text_tokens) in enumerate(tr_dataloader):
     print(image.shape, gt.shape, bboxes.shape)
@@ -366,11 +376,12 @@ def main():
     # cross entropy loss
     ce_loss = nn.BCEWithLogitsLoss(reduction="mean")
     # %% train
-    num_epochs = 2
+    num_epochs = 1
     iter_num = 0
     losses = []
+    accuracy = []
     best_loss = 1e10
-    train_dataset = NpyDataset(args.tr_npy_path)
+    train_dataset = NpyDataset(data_roots)
 
     print("Number of training samples: ", len(train_dataset))
     train_dataloader = DataLoader(
@@ -426,6 +437,7 @@ def main():
         epoch_loss /= step
         epoch_dice /= step
         losses.append(epoch_loss)
+        accuracy.append(epoch_dice)
         if args.use_wandb:
             wandb.log({"epoch_loss": epoch_loss}, {"epoch_dice": epoch_dice})
         print(
@@ -454,6 +466,14 @@ def main():
         plt.xlabel("Epoch")
         plt.ylabel("Loss")
         plt.savefig(join(model_save_path, args.task_name + "train_loss.png"))
+        plt.close()
+
+        # %% plot accuracy
+        plt.plot(accuracy)
+        plt.title("DSC")
+        plt.xlabel("Epoch")
+        plt.ylabel("Accuracy")
+        plt.savefig(join(model_save_path, args.task_name + "train_accuracy.png"))
         plt.close()
 
 

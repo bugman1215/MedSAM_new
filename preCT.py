@@ -46,15 +46,24 @@ WINDOW_WIDTH = 400  # only for CT images
 organ_labels = [1, 2, 3, 4]  # 器官标签：1-肝脏，2-肾脏，3-脾脏，4-胰腺
 organ_names = {1: 'liver', 2: 'kidney', 3: 'spleen', 4: 'pancreas'}
 
+
 # %% save preprocessed images and masks as npz files
 for organ_label in organ_labels:
     organ_name = organ_names[organ_label]
+    description = f"Segment the {organ_name}"
+
     print(f"Processing organ: {organ_name} (label={organ_label})")
     # 创建器官特定的文件夹
     organ_imgs_path = join(npy_path, "imgs", organ_name)
     organ_gts_path = join(npy_path, "gts", organ_name)
     os.makedirs(organ_imgs_path, exist_ok=True)
     os.makedirs(organ_gts_path, exist_ok=True)
+
+    # 保存 descriptions.txt 文件到每个器官的 imgs 和 gts 文件夹
+    with open(join(organ_imgs_path, 'descriptions.txt'), 'w') as f:
+        f.write(description)
+    with open(join(organ_gts_path, 'descriptions.txt'), 'w') as f:
+        f.write(description)
 
     for name in tqdm(names):  # 遍历所有病例
         image_name = name.split(gt_name_suffix)[0] + img_name_suffix
